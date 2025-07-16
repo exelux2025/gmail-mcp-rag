@@ -4,3 +4,7 @@ google-api-python-client
 sentence-transformers
 chromadb
 python-dotenv
+langgraph
+langchain
+langchain-openai
+openai

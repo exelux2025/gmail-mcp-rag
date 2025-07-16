@@ -13,6 +13,7 @@ import chromadb
 from chromadb.config import Settings
 
 from logger import get_logger, set_log_level
+from workflow import workflow, GraphState
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -129,8 +130,73 @@ def index_emails(service, embedder, collection, db_dir, n=100):
         logger.error(f"Failed to index emails: {e}")
         raise
 
+def semantic_search_with_workflow(embedder, collection, query, top_k=5):
+    logger.info(f"Performing semantic search with LangGraph workflow for query: '{query}' (top_k={top_k})")
+    try:
+        # Step 1: Perform semantic search
+        q_emb = embedder.encode(query).tolist()
+        results = collection.query(query_embeddings=[q_emb], n_results=top_k)
+        
+        # Step 2: Prepare search results for the workflow
+        search_results = []
+        for i, (_id, meta, dist) in enumerate(zip(results["ids"][0], results["metadatas"][0], results["distances"][0])):
+            search_results.append({
+                "id": _id,
+                "score": dist,
+                "snippet": meta['snippet']
+            })
+        
+        logger.info(f"Found {len(search_results)} initial search results")
+        
+        # Log the top retrieved emails
+        logger.info("="*50)
+        logger.info("TOP RETRIEVED EMAILS:")
+        logger.info("="*50)
+        for i, result in enumerate(search_results, 1):
+            logger.info(f"{i}. ID: {result['id']} | Score: {result['score']:.4f}")
+            logger.info(f"   Content: {result['snippet'][:150]}...")
+        
+        # Step 3: Run the LangGraph workflow
+        initial_state: GraphState = {
+            "query": query,
+            "search_results": search_results,
+            "filtered_results": [],
+            "final_answer": "",
+            "error": ""
+        }
+        
+        # Execute the workflow
+        final_state = workflow.invoke(initial_state)
+        
+        # Step 4: Display results
+        if final_state.get("error"):
+            logger.error(f"Workflow error: {final_state['error']}")
+            return
+        
+        # Show filtered results
+        filtered_results = final_state.get("filtered_results", [])
+        if filtered_results:
+            logger.info(f"Filtered to {len(filtered_results)} relevant results")
+            for i, result in enumerate(filtered_results, 1):
+                relevance_score = result.get('relevance_score', 'N/A')
+                reason = result.get('reason', 'No reason provided')
+                logger.info(f"Filtered Result {i}: {result['id']} (Relevance: {relevance_score}) - {reason}")
+        
+        # Show final answer
+        final_answer = final_state.get("final_answer", "")
+        if final_answer:
+            logger.info("="*50)
+            logger.info("AI-GENERATED ANSWER:")
+            logger.info("="*50)
+            logger.info(final_answer)
+            logger.info("="*50)
+        
+    except Exception as e:
+        logger.error(f"Failed to perform semantic search with workflow: {e}")
+
 def semantic_search(embedder, collection, query, top_k=5):
-    logger.info(f"Performing semantic search for query: '{query}' (top_k={top_k})")
+    """Legacy function for simple search without LangGraph"""
+    logger.info(f"Performing simple semantic search for query: '{query}' (top_k={top_k})")
     try:
         q_emb = embedder.encode(query).tolist()
         results = collection.query(query_embeddings=[q_emb], n_results=top_k)
@@ -138,10 +204,8 @@ def semantic_search(embedder, collection, query, top_k=5):
         logger.info(f"Found {len(results['ids'][0])} results")
         for i, (_id, meta, dist) in enumerate(zip(results["ids"][0], results["metadatas"][0], results["distances"][0]), 1):
             logger.info(f"Result {i}: {_id} (score {dist:.4f}): {meta['snippet']}…")
-            print(f"→ {_id} (score {dist:.4f}): {meta['snippet']}…")
     except Exception as e:
         logger.error(f"Failed to perform semantic search: {e}")
-        print(f"Error performing search: {e}")
 
 def main():
     logger.info("Starting Gmail RAG application...")
@@ -189,23 +253,38 @@ def main():
 
         # 5. Query loop
         logger.info("Starting interactive query loop...")
+        logger.info("="*60)
+        logger.info("GMAIL RAG WITH LANGGRAPH WORKFLOW")
+        logger.info("="*60)
+        logger.info("Commands:")
+        logger.info("- Type your search query for AI-powered email search")
+        logger.info("- Type 'simple' for basic search without AI processing")
+        logger.info("- Type 'exit' or 'quit' to exit")
+        logger.info("="*60)
+        
         while True:
             try:
-                q = input("\nEnter search query (or 'exit'): ").strip()
+                q = input("\nEnter search query (or 'exit'/'simple'): ").strip()
                 if q.lower() in ("exit", "quit"):
                     logger.info("User requested exit")
                     break
                 if not q:
                     logger.warning("Empty query received, skipping...")
                     continue
+                
+                if q.lower() == "simple":
+                    simple_query = input("Enter query for simple search: ").strip()
+                    if simple_query:
+                        semantic_search(embedder, collection, simple_query, top_k=5)
+                    continue
                     
-                semantic_search(embedder, collection, q, top_k=5)
+                # Use the LangGraph workflow for enhanced search
+                semantic_search_with_workflow(embedder, collection, q, top_k=5)
             except KeyboardInterrupt:
                 logger.info("Received keyboard interrupt, exiting...")
                 break
             except Exception as e:
                 logger.error(f"Error in query loop: {e}")
-                print(f"Error: {e}")
                 
     except Exception as e:
         logger.error(f"Application failed: {e}")
