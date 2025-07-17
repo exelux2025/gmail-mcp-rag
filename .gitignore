@@ -195,3 +195,4 @@ cython_debug/
 
 # Chromadb
 chromadb/
+chromadb_mcp/

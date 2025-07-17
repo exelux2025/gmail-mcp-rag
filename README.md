@@ -69,4 +69,15 @@ To launch the main application:
 streamlit run app.py
 ```
 
+### MCP Integration (Alternative)
+
+This project also includes an MCP (Model Context Protocol) implementation in the `gmail_mcp/` folder:
+
+```bash
+# Run MCP demo
+uv run python run_mcp_demo.py
+```
+
+The MCP version provides the same Gmail RAG functionality with a different architecture approach. See `gmail_mcp/README.md` for details.
+
 ---
